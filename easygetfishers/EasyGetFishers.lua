@@ -1,7 +1,7 @@
 --[[
 * MIT License
 * 
-* Copyright (c) 2023 Tsukuyomiii, Thorny
+* Copyright (c) 2023 Tsukuyomiii [https://github.com/The-Tsukuyomiii], Thorny 
 * 
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -22,15 +22,17 @@
 * SOFTWARE.
 ]]--
 
-addon.name      = 'Easy Get Fishers';
+addon.name      = 'EasyGetFishers';
 addon.author    = 'Tsukuyomiii, Thorny';
-addon.version   = '1.0';
+addon.version   = '1.0.1';
 addon.desc      = 'Easy way for GMs to !goto current fishers.';
+addon.link	= '[https://github.com/The-Tsukuyomiii/Easy-Get-Fishers]';
 
 require('common');
 local imgui = require('imgui');
 local trackTimeout = 0;
 local results = T{};
+local zoneData = T{};
 local interface = {
     IsOpen = { false },
     SelectedIndex = 0,
@@ -54,32 +56,45 @@ ashita.events.register('text_in', 'HandleText', function (e)
 
     if zoneMatch and nameMatch and jobMatch and skillMatch then
         if (os.clock() < trackTimeout) then
-            results:append(T{
-                Zone = string.sub(e.message, zoneEnd + 1, nameMatch - 2);
-                Name = string.sub(e.message, nameEnd + 1, jobMatch - 2);
-                Level = string.sub(e.message, jobEnd + 1, skillMatch - 2);
-                Skill = string.sub(e.message, skillEnd + 1);
-            });
+            local result = T{
+                Zone = string.sub(e.message, zoneEnd + 1, nameMatch - 2),
+                Name =  string.sub(e.message, nameEnd + 1, jobMatch - 2),
+                Level = tonumber(string.sub(e.message, jobEnd + 1, skillMatch - 2)),
+                Skill = tonumber(string.sub(e.message, skillEnd + 1)),
+            };
+            results:append(result);
             trackTimeout = os.clock() + 3;
         end
     end
 end);
 
 local function RenderInterface()
-    imgui.SetNextWindowSize({ 800, 220, });
-    imgui.SetNextWindowSizeConstraints({ 800, 220, }, { FLT_MAX, FLT_MAX, });
-    if (imgui.Begin('Current Fishers', interface.IsOpen, ImGuiWindowFlags_NoResize)) then
+    if (imgui.Begin('Current Fishers', interface.IsOpen, ImGuiWindowFlags_AlwaysAutoResize)) then
+        if imgui.BeginCombo('##ZoneList_ComboBox', zoneData[interface.SelectedZone].Display, ImGuiComboFlags_None) then
+            for index,entry in ipairs(zoneData) do
+                local isSelected = (interface.SelectedZone == index);
+                if imgui.Selectable(entry.Display, isSelected) then
+                    if (not isSelected) then
+                        interface.SelectedZone = index;
+                        interface.SelectedIndex = 0;
+                    end
+                end
+            end
+            imgui.EndCombo();
+        end
+
         imgui.BeginGroup();
-        imgui.BeginChild('leftpane', { 770, 180 }, true);
-        for i = 1,#results do
-            local result = results[i];
-            local outputString = string.format('Name:%s Zone:%s Level:%s Skill:%s', result.Name, result.Zone, result.Level, result.Skill);
+        imgui.BeginChild('leftpane', { 500, 180 }, true);
+        local entries = zoneData[interface.SelectedZone].Entries;
+        for i = 1,#entries do
+            local entry = entries[i];
+            local outputString = string.format('%-20s Lv:%-3u Skill:%-2u', entry.Name, entry.Level, entry.Skill);
             if (imgui.Selectable(outputString, interface.SelectedIndex == i)) then
                 interface.SelectedIndex = i;
             end
 
             if (imgui.IsItemHovered() and imgui.IsMouseDoubleClicked(0)) then
-                local cmd = string.format('/unity !goto %s', result.Name);
+                local cmd = string.format('/unity !goto %s', entry.Name);
                 AshitaCore:GetChatManager():QueueCommand(1, cmd);
             end
         end
@@ -92,6 +107,50 @@ end
 ashita.events.register('d3d_present', 'HandleRender', function ()
     if (trackTimeout ~= 0) and (os.clock() > trackTimeout) then
         trackTimeout = 0;
+
+        if (#results == 0) then
+            print('No results found.');
+            return;
+        end
+
+        local resultsByZone = T{};
+        for _,result in ipairs(results) do
+            local zone = resultsByZone[result.Zone];
+            if zone == nil then
+                resultsByZone[result.Zone] = {
+                Name = result.Zone,
+                Count = 1,
+                Entries = T { result },
+                };
+            else
+                zone.Count = zone.Count + 1;
+                zone.Entries:append(result);
+            end
+        end
+
+        zoneData = T{};
+        for _,zone in pairs(resultsByZone) do
+            zone.Display = string.format('%s[%u]', zone.Name, zone.Count);
+            zoneData:append(zone);
+        end
+        
+        table.sort(zoneData, function(a,b)
+            return a.Count > b.Count;
+        end);
+
+        for _,zone in ipairs(zoneData) do
+            table.sort(zone.Entries, function(a,b)
+                if (a.Level ~= b.Level) then
+                    return (a.Level < b.Level);
+                end
+                if (a.Skill ~= b.Skill) then
+                    return (a.Skill < b.Skill);
+                end
+                return (a.Name < b.Name);
+            end);
+        end
+
+        interface.SelectedZone = 1;
         interface.IsOpen[1] = true;
     end
 
